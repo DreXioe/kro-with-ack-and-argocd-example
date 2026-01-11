@@ -1,0 +1,106 @@
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: application
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: Application
+    spec:
+      # Input parameters users provide when creating an Application
+      name: string
+      image: string
+      bucketName: string
+    status:
+      # Output values exposed to users (CEL expressions pointing to resources)
+      bucketARN: ${bucket.status.ackResourceMetadata.arn}
+      tableARN: ${table.status.ackResourceMetadata.arn}
+
+  resources:
+    # S3 Bucket managed by ACK
+    - id: bucket
+      template:
+        apiVersion: s3.services.k8s.aws/v1alpha1
+        kind: Bucket
+        metadata:
+          name: ${schema.spec.bucketName}
+          ownerReferences:
+              - apiVersion: kro.run/v1alpha1
+                kind: ${schema.kind}
+                name: ${schema.metadata.name}
+                uid: ${schema.metadata.uid}
+                blockOwnerDeletion: true
+                controller: false
+          annotations:
+            argocd.argoproj.io/tracking-id: ${schema.metadata.?annotations["argocd.argoproj.io/tracking-id"]}
+        spec:
+          name: ${schema.spec.bucketName}
+          tagging:
+            tagSet:
+              - key: app
+                value: ${schema.spec.name}
+
+    # DynamoDB Table managed by ACK
+    - id: table
+      template:
+        apiVersion: dynamodb.services.k8s.aws/v1alpha1
+        kind: Table
+        metadata:
+          name: ${schema.spec.name}-table
+          ownerReferences:
+              - apiVersion: kro.run/v1alpha1
+                kind: ${schema.kind}
+                name: ${schema.metadata.name}
+                uid: ${schema.metadata.uid}
+                blockOwnerDeletion: true
+                controller: false
+          annotations:
+            argocd.argoproj.io/tracking-id: ${schema.metadata.?annotations["argocd.argoproj.io/tracking-id"]}
+        spec:
+          tableName: ${schema.spec.name}-data
+          billingMode: PAY_PER_REQUEST
+          attributeDefinitions:
+            - attributeName: id
+              attributeType: S
+          keySchema:
+            - attributeName: id
+              keyType: HASH
+
+    # Deployment that uses the AWS resources
+    - id: deployment
+      template:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: ${schema.spec.name}
+          ownerReferences:
+              - apiVersion: kro.run/v1alpha1
+                kind: ${schema.kind}
+                name: ${schema.metadata.name}
+                uid: ${schema.metadata.uid}
+                blockOwnerDeletion: true
+                controller: false
+          annotations:
+            argocd.argoproj.io/tracking-id: ${schema.metadata.?annotations["argocd.argoproj.io/tracking-id"]}
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: ${schema.spec.name}
+          template:
+            metadata:
+              labels:
+                app: ${schema.spec.name}
+            spec:
+              containers:
+                - name: nginx:latest
+                  image: ${schema.spec.image}
+                  env:
+                    - name: BUCKET_NAME
+                      value: ${schema.spec.bucketName}
+                    - name: BUCKET_ARN
+                      value: ${bucket.status.ackResourceMetadata.arn}
+                    - name: TABLE_NAME
+                      value: ${schema.spec.name}-data
+                    - name: TABLE_ARN
+                      value: ${table.status.ackResourceMetadata.arn}
