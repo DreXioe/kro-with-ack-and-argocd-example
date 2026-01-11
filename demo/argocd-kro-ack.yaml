@@ -1,0 +1,8 @@
+apiVersion: kro.run/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+spec:
+  name: my-app
+  image: my-app:latest
+  bucketName: my-app-data-adfqe23d22x2fdsfsf
